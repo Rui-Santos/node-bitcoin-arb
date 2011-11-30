@@ -1,13 +1,14 @@
 var https       = require('https');
 var querystring = require('querystring');
+var crypto      = require('crypto');
 
-var TRADEHILL = module.exports = function ( username, password) {
-	this.username   = username;
-	this.password   = password;
-	this.balance    = -1;
+var MTGOX = module.exports = function ( key, secretkey ) {
+	this.key            = key;
+	this.secretkey      = secretkey;
+	this.balance        = -1;
 };
 
-TRADEHILL.prototype.getBalance = function ( callback ){
+MTGOX.prototype.getBalance = function ( callback ){
 
 	var self = this;
 
@@ -21,18 +22,24 @@ TRADEHILL.prototype.getBalance = function ( callback ){
 	}
 };
 
-TRADEHILL.prototype.updateBalance = function( callback ){
+MTGOX.prototype.updateBalance = function( callback ){
 
 	var self = this;
 
-	var params = querystring.stringify({ name:this.username, pass:this.password });
+	var shasum = crypto.createHmac('sha512', this.secretkey );
+
+	var params      = { nonce : 12342342 };
+	var qstring     = querystring.stringify( params );
+
+	shasum.update( qstring );
 
 	var options = {
-		host: 'api.tradehill.com',
-		path: '/APIv1/USD/GetBalance',
+		host: 'mtgox.com',
+		path: '/api/0/getFunds.php',
 		method: 'POST',
 		headers:{
-				'Content-Length': params.length
+				'Rest-Key'  : this.key,
+				'Rest-Sign' : shasum.digest('base64')
 		}
 	};
 
@@ -45,6 +52,10 @@ TRADEHILL.prototype.updateBalance = function( callback ){
 		});
 
 		res.on('end', function(){
+
+			console.log(data);
+
+			return;
 
 			var balance;
 
@@ -78,11 +89,11 @@ TRADEHILL.prototype.updateBalance = function( callback ){
 		console.log('Getting balance failed');
 	});
 
-	request.write( params );
+	request.write( qstring );
 	request.end();
 }
 
-TRADEHILL.prototype.storeBalance = function( balance ){
+MTGOX.prototype.storeBalance = function( balance ){
 
 	var db = require("./mysql");
 
@@ -96,16 +107,16 @@ TRADEHILL.prototype.storeBalance = function( balance ){
 	db.end();
 }
 
-TRADEHILL.prototype.getOrders = function( symbol ){
+MTGOX.prototype.getOrders = function( symbol ){
 
 	var self = this;
 
 	var options = {
-		host: 'api.tradehill.com',
+		host: 'api.MTGOX.com',
 		path: '/APIv1/'+symbol+'/Orderbook'
 	};
 
-	console.log("Getting orders for TradeHill " + symbol );
+	console.log("Getting orders for MTGOX " + symbol );
 
 	https.get( options, function(res) {
 
@@ -156,7 +167,7 @@ TRADEHILL.prototype.getOrders = function( symbol ){
 								" FROM Currencies WHERE Symbol = ?", [symbol] );
 					});
 
-					console.log("Getting orders for TradeHill " + symbol + " done");
+					console.log("Getting orders for MTGOX " + symbol + " done");
 
 					self.updateRates( symbol );
 				});
@@ -168,7 +179,7 @@ TRADEHILL.prototype.getOrders = function( symbol ){
 	return;
 }
 
-TRADEHILL.prototype.updateRates = function( symbol ){
+MTGOX.prototype.updateRates = function( symbol ){
 
 	if ( !symbol ) return false;
 
@@ -176,7 +187,7 @@ TRADEHILL.prototype.updateRates = function( symbol ){
 
 	db.query("SELECT Id FROM Currencies WHERE Symbol = '"+ symbol +"'", function( err, results, fields ){
 
-		console.log( "Updating TradeHill rates" );
+		console.log( "Updating MTGOX rates" );
 
 		var symbol_id = results[0].Id;
 
@@ -196,7 +207,7 @@ TRADEHILL.prototype.updateRates = function( symbol ){
 
 		db.query(sql);
 
-		console.log( "Updating TradeHill rates done" );
+		console.log( "Updating MTGOX rates done" );
 		return;
 	});
 
