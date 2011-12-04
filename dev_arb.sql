@@ -3,7 +3,7 @@
 -- http://www.phpmyadmin.net
 --
 -- Host: 10.6.10.156
--- Generation Time: Nov 30, 2011 at 04:09 PM
+-- Generation Time: Dec 04, 2011 at 03:27 PM
 -- Server version: 5.1.49
 -- PHP Version: 5.3.3-7+squeeze3
 
@@ -46,24 +46,13 @@ CREATE TABLE IF NOT EXISTS `Exchanges` (
   `Dt` datetime NOT NULL,
   `BTC` decimal(16,8) unsigned NOT NULL,
   `USD` decimal(9,2) unsigned NOT NULL,
+  `EUR` decimal(9,2) unsigned NOT NULL,
+  `GBP` decimal(9,2) unsigned NOT NULL,
+  `PLN` decimal(9,2) unsigned NOT NULL,
+  `AUD` decimal(9,2) unsigned NOT NULL,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `Code` (`Code`)
 ) ENGINE=MyISAM  DEFAULT CHARSET=utf8 COMMENT='Exchanges' AUTO_INCREMENT=10 ;
-
--- --------------------------------------------------------
-
---
--- Table structure for table `Orders`
---
-
-CREATE TABLE IF NOT EXISTS `Orders` (
-  `Exchanges_Id` tinyint(3) unsigned NOT NULL,
-  `Currencies_Id` tinyint(3) unsigned NOT NULL,
-  `Dt` datetime NOT NULL,
-  `BidAsk` enum('bid','ask') NOT NULL,
-  `Price` decimal(16,7) unsigned NOT NULL,
-  `Amount` int(10) unsigned NOT NULL
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
 -- --------------------------------------------------------
 
