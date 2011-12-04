@@ -1,204 +1,160 @@
-var https       = require('https');
-var querystring = require('querystring');
+var db = require("./mysql");
 
-var TRADEHILL = module.exports = function ( username, password) {
-	this.username   = username;
-	this.password   = password;
-	this.balance    = -1;
-};
+var MTGOX = module.exports = function ( key, secret ) {
 
-TRADEHILL.prototype.getBalance = function ( callback ){
+	var get_http_options = {
+                        host    : 'api.tradehill.com',
+                        method  : 'GET',
+						headers : {
+									'User-Agent'    : 'btb'
+								}
+                        };
 
-	var self = this;
+	var post_http_options = {
+                        host    : 'api.tradehill.com',
+                        method  : 'POST',
+						headers : {
+									'User-Agent'    : 'btb',
+									'Accept'        : 'application/json',
+									'Content-Type'  : 'application/x-www-form-urlencoded'
+								}
+                        };
 
-	if ( this.balance < 0 ){
-		this.updateBalance( function ( balance ){
-			self.balance = balance;
-			callback(balance);
-		});
-	}else{
-		callback(this.balance);
+	var error_wrapper = function( msg ){
+		console.log( Date.now() + " Error - MTGOX : " + msg );
+	}
+
+	var fetch = function( url, data, method, error, callback ){
+
+		if ( !url ){
+			error_wrapper("No URL specified");
+			error('No URL specified');
+			return;
+		}
+
+		var https   = require('https');
+		var qs      = require('querystring');
+
+		var take_response = function(res){
+
+				var whole_response = '';
+
+				res.on('data', function(chunk){
+					whole_response += chunk;
+				});
+
+				res.on('end', function(){
+					callback( whole_response );
+				});
+
+		};
+
+		if ( method == 'GET' ){
+
+			get_http_options.path = url;
+
+			if ( data ){
+				get_http_options.path += "?" + qs.stringify(data);
+			}
+
+			var request = https.get( get_http_options , take_response ).on('error', function(e) {
+                console.log("Transport layer at TradeHill");
+                error(e);
+			});
+
+			request.end();
+
+		}else{
+
+			post_http_options.path = url;
+
+            var post_data;
+
+            if ( data ){
+                post_data = data;
+                post_data['name'] = key;
+                post_data['pass'] = secret;
+            }else{
+                post_data = { name: key, pass: secret };
+            }
+
+			var post_data_string    = qs.stringify( post_data );
+
+            post_http_options.headers['Content-Length'] = post_data_string.length;
+
+			var request = https.request( post_http_options , take_response ).on('error', function(e) {
+				console.log("Transport layer at TradeHill");
+				error(e);
+			});
+
+			request.write(post_data_string);
+			request.end();
+		}
+	}
+
+	return {
+				USD : -1,
+				BTC : -1,
+                EUR : -1,
+				getBalance : function ( callback ) {
+                    var self = this;
+
+                    fetch('/APIv1/USD/GetBalance','','POST', function(error){ throw error }, function(data){
+
+                        try {
+                            var json = JSON.parse(data);
+                        } catch ( err ) {
+                            throw err;
+                        }
+
+                        self.USD = json.USD;
+                        self.BTC = json.BTC;
+
+                        if ( json.EUR ){
+                            self.EUR = json.EUR;
+                        }else{
+                            self.EUR = -1;
+                        }
+
+                        db.query(
+                            "UPDATE `Exchanges` SET " +
+                            "   `USD` = ?, BTC = ?, EUR = ?, Dt = NOW()" +
+                            "WHERE" +
+                            "   Code = 'th'"
+                            , [ self.USD, self.BTC, self.EUR ], callback );
+                    });
+				},
+                getRates : function ( callback ) {
+
+                    var curr = ['USD','EUR'];
+
+                    var inserted = 0;
+
+                    for(var i = 0; i < curr.length; i++) {
+                        (function(i) {
+                            fetch('/APIv1/' + curr[i] + '/Ticker','','GET', function(error){ throw error }, function(data){
+                                try {
+                                    var json = JSON.parse(data);
+                                } catch ( err ) {
+                                    throw err;
+                                }
+
+                                console.log( curr[i] + " - " + json.ticker.buy + " - " + json.ticker.sell );
+
+                                db.query(
+                                        "UPDATE Rates SET Bid = ?, Ask = ?, Dt = NOW() " +
+                                        "WHERE Exchanges_Id = 2 AND Currencies_Id = " +
+                                            "( SELECT Id FROM Currencies WHERE Symbol = '" + curr[i] + "' )",
+                                        [ json.ticker.buy, json.ticker.sell ]
+                                );
+
+                                if ( ++inserted == curr.length ){
+                                  db.end();
+                                  callback();
+                                }
+                            });
+                        })(i);
+                    }
+                }
 	}
 };
-
-TRADEHILL.prototype.updateBalance = function( callback ){
-
-	var self = this;
-
-	var params = querystring.stringify({ name:this.username, pass:this.password });
-
-	var options = {
-		host: 'api.tradehill.com',
-		path: '/APIv1/USD/GetBalance',
-		method: 'POST',
-		headers:{
-				'Content-Length': params.length
-		}
-	};
-
-	var data = '';
-
-	var request = https.request( options, function(res){
-
-		res.on('data', function(chunk){
-			data += chunk;
-		});
-
-		res.on('end', function(){
-
-			var balance;
-
-			try {
-			  balance = JSON.parse(data);
-			}
-			catch (err) {
-				console.error('JSON conversion from data incorrect');
-				console.error(data);
-				return;
-			}
-
-			if ( balance.error ){
-				console.error("Error returned - " + balance.error);
-				return;
-			}
-
-			var clean_balance = {
-				USD : balance.USD,
-				BTC : balance.BTC
-			};
-
-			self.storeBalance( clean_balance );
-
-			callback(clean_balance);
-		});
-	});
-
-	request.on('error', function(error){
-		console.log(error);
-		console.log('Getting balance failed');
-	});
-
-	request.write( params );
-	request.end();
-}
-
-TRADEHILL.prototype.storeBalance = function( balance ){
-
-	var db = require("./mysql");
-
-	db.query(
-			"UPDATE `Exchanges` SET " +
-			"   `USD` = ?, BTC = ?, Dt = NOW()" +
-			"WHERE" +
-			"   Code = 'th'"
-			, [balance.USD, balance.BTC ]);
-
-	db.end();
-}
-
-TRADEHILL.prototype.getOrders = function( symbol ){
-
-	var self = this;
-
-	var options = {
-		host: 'api.tradehill.com',
-		path: '/APIv1/'+symbol+'/Orderbook'
-	};
-
-	console.log("Getting orders for TradeHill " + symbol );
-
-	https.get( options, function(res) {
-
-		var data = '';
-
-		res.on('data', function(chunk){
-			data += chunk;
-		});
-
-		res.on('end', function(){
-
-			var orders;
-
-			try {
-			  orders = JSON.parse(data);
-			}
-			catch (err) {
-				console.error('JSON conversion from data incorrect');
-				console.error(data);
-				return;
-			}
-
-			if ( orders.error ){
-				console.error("Error returned - " + orders.error);
-				return;
-			}
-
-			var db = require('./mysql');
-
-			db.query("DELETE FROM Orders WHERE Exchanges_Id = 2 AND Currencies_Id = (" +
-				"SELECT Id FROM Currencies WHERE Symbol = ?" +
-				")", [symbol], function(){
-					orders.bids.forEach(function(data){
-						db.query("INSERT INTO Orders( " +
-								"Exchanges_Id, Currencies_Id, Dt, BidAsk, Price, Amount" +
-								")" +
-								"SELECT" +
-								"   2, Id, NOW(), 'bid', " + data[0] + ", " + data[1] +
-								" FROM Currencies WHERE Symbol = ?", [symbol] );
-					});
-
-					orders.asks.forEach(function(data){
-						db.query("INSERT INTO Orders( " +
-								"Exchanges_Id, Currencies_Id, Dt, BidAsk, Price, Amount" +
-								")" +
-								"SELECT" +
-								"   2, Id, NOW(), 'ask', " + data[0] + ", " + data[1] +
-								" FROM Currencies WHERE Symbol = ?", [symbol] );
-					});
-
-					console.log("Getting orders for TradeHill " + symbol + " done");
-
-					self.updateRates( symbol );
-				});
-		});
-	}).on('error', function(e) {
-	  console.log("Got error: " + e.message);
-	});
-
-	return;
-}
-
-TRADEHILL.prototype.updateRates = function( symbol ){
-
-	if ( !symbol ) return false;
-
-	var db = require('./mysql');
-
-	db.query("SELECT Id FROM Currencies WHERE Symbol = '"+ symbol +"'", function( err, results, fields ){
-
-		console.log( "Updating TradeHill rates" );
-
-		var symbol_id = results[0].Id;
-
-		db.query("UPDATE `Rates` SET" +
-				" Bid = (" +
-				"   SELECT MAX(Price) FROM `Orders` WHERE BidAsk = 'bid' and Exchanges_Id = 2 AND Currencies_Id = " + symbol_id +
-				") " +
-				"WHERE " +
-				"Exchanges_Id = 2 AND Currencies_Id = " + symbol_id );
-
-		var sql = "UPDATE `Rates` SET" +
-				" Ask = (" +
-				"   SELECT MIN(Price) FROM `Orders` WHERE BidAsk = 'ask' AND Exchanges_Id = 2 AND Currencies_Id = " + symbol_id +
-				") " +
-				"WHERE " +
-				"Exchanges_Id = 2 AND Currencies_Id = " + symbol_id;
-
-		db.query(sql);
-
-		console.log( "Updating TradeHill rates done" );
-		return;
-	});
-
-	return;
-}

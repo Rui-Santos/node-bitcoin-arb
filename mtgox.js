@@ -119,13 +119,9 @@ var MTGOX = module.exports = function ( key, secret ) {
                             "WHERE" +
                             "   Code = 'mtgox'"
                             , [ self.USD, self.BTC, self.EUR ], callback );
-
-                        db.end();
                     });
 				},
                 getRates : function ( callback ) {
-
-                    var self = this;
 
                     var curr = ['USD','EUR'];
 
@@ -146,16 +142,17 @@ var MTGOX = module.exports = function ( key, secret ) {
                                     return;
                                 }
 
+                                console.log( curr[i] + " - " + json.return.buy.value + " - " + json.return.sell.value );
+
                                 db.query(
-                                        "UPDATE Rates SET Bid = ?, Ask = ? " +
+                                        "UPDATE Rates SET Bid = ?, Ask = ?, Dt = NOW() " +
                                         "WHERE Exchanges_Id = 1 AND Currencies_Id IN " +
                                             "(SELECT Id FROM Currencies WHERE Symbol = '" + curr[i] + "')",
                                         [ json.return.buy.value, json.return.sell.value]
                                 );
 
-                                db.end();
-
                                 if ( ++inserted == curr.length ){
+                                  db.end();
                                   callback();
                                 }
                             });
