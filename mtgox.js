@@ -13,6 +13,7 @@ var MTGOX = module.exports = function ( key, secret ) {
 	var post_http_options = {
                         host    : 'mtgox.com',
                         method  : 'POST',
+						/*port    : 321,*/
 						headers : {
 									'User-Agent'    : 'btb',
 									'Rest-Key'      : key,
@@ -22,16 +23,23 @@ var MTGOX = module.exports = function ( key, secret ) {
 								}
                         };
 
-	var error_wrapper = function( msg ){
-		console.log( Date.now() + " Error - MTGOX : " + msg );
+	var logger = function( err, throw_exception ){
+
+		var time = new Date();
+
+		console.error( time.toUTCString() + " - MTGOX - " + err.message );
+
+		if ( throw_exception ){
+			throw err;
+		}
 	}
 
-	var fetch = function( url, data, method, error, callback ){
+	var fetch = function( params ){
 
-		if ( !url ){
-			error_wrapper("No URL specified");
-			error('No URL specified');
-			return;
+		/* url, data, method, error, callback */
+
+		if ( !params.url ){
+			logger( new Error('No URL given'), true );
 		}
 
 		var https   = require('https');
@@ -39,39 +47,35 @@ var MTGOX = module.exports = function ( key, secret ) {
 
 		var take_response = function(res){
 
-				var whole_response = '';
+			var whole_response = '';
 
-				res.on('data', function(chunk){
-					whole_response += chunk;
-				});
-
-				res.on('end', function(){
-					callback( whole_response );
-				});
-
-		};
-
-		if ( method == 'GET' ){
-
-			get_http_options.path = url;
-
-			if ( data ){
-				get_http_options.path += "?" + qs.stringify(data);
-			}
-
-			var request = https.get( get_http_options , take_response ).on('error', function(e) {
-				error(e);
+			res.on('data', function(chunk){
+				whole_response += chunk;
 			});
 
+			res.on('end', function(){
+				return params.callback( whole_response );
+			});
+		};
+
+		if ( params.method && params.method == 'GET' ){
+
+			get_http_options.path = params.url;
+
+			if ( params.data ){
+				get_http_options.path += "?" + qs.stringify( params.data );
+			}
+
+			var request = https.get( get_http_options , take_response ).on('error', params.error );
 			request.end();
 
 		}else{
 
 			var crypto  = require('crypto');
 
-			post_http_options.path = url;
+			post_http_options.path = params.url;
 
-			var post_data           = data || {};
+			var post_data           = params.data || {};
 			post_data['nonce']      = Date.now();
 			var post_data_string    = qs.stringify( post_data );
 
@@ -80,84 +84,138 @@ var MTGOX = module.exports = function ( key, secret ) {
 
 			post_http_options.headers['Rest-Sign'] = hash.update(post_data_string).digest('base64');
 
-			var request = https.request( post_http_options , take_response ).on('error', function(e) {
-				console.log("Transport layer at MTGOX");
-				error(e);
-			});
+			var request = https.request( post_http_options , take_response ).on('error', params.error );
 
 			request.write(post_data_string);
 			request.end();
 		}
 	}
 
+	var setBalance = function( symbol, val ){
+		this[symbol] = val;
+		db.query("UPDATE Exchanges SET `" + symbol + "` = " + val + " WHERE Id = 1");
+	}
+
 	return {
 				USD : -1,
 				BTC : -1,
                 EUR : -1,
-				getBalance : function ( callback ) {
-                    var self = this;
+				getBalance : function ( error, callback ) {
 
-                    fetch('/api/0/info.php','','', function(error){ throw error }, function(data){
-                        try {
-                            var json = JSON.parse(data);
-                        } catch ( err ) {
-                            throw err;
-                        }
+					var self = this;
 
-                        self.USD = json.Wallets.USD.Balance.value;
-                        self.BTC = json.Wallets.BTC.Balance.value;
+					var retry = 3;
 
-                        if ( json.Wallets.EUR ){
-                            self.EUR = json.Wallets.EUR.Balance.value;
-                        }else{
-                            self.EUR = -1;
-                        }
+					var error_handler = function(err){
 
-                        db.query(
-                            "UPDATE `Exchanges` SET " +
-                            "   `USD` = ?, BTC = ?, EUR = ?, Dt = NOW()" +
-                            "WHERE" +
-                            "   Code = 'mtgox'"
-                            , [ self.USD, self.BTC, self.EUR ], callback );
-                    });
+												if ( retry == 0 ){
+													throw err;
+													return;
+												}
+
+												logger(err, false);
+												console.log("Retrying - " + retry + " retry left");
+												retry--;
+
+												fetch(params);
+											};
+
+					var params = {
+						url         : '/api/0/info.php',
+						error       : error_handler,
+						callback    : function(data){
+
+	                        try {
+	                            var json = JSON.parse(data);
+	                        } catch ( err ) {
+		                        error_handler( err );
+								return;
+	                        }
+
+							if ( json.error ){
+								error_handler( new Error( json.error ) );
+								return;
+							}
+
+	                        self.USD = json.Wallets.USD.Balance.value;
+	                        self.BTC = json.Wallets.BTC.Balance.value;
+
+	                        if ( json.Wallets.EUR ){
+	                            self.EUR = json.Wallets.EUR.Balance.value;
+	                        }else{
+	                            self.EUR = -1;
+	                        }
+
+	                        db.query(
+	                            "UPDATE `Exchanges` SET " +
+	                            "   `USD` = ?, BTC = ?, EUR = ?, Dt = NOW()" +
+	                            "WHERE" +
+	                            "   Code = 'mtgox'"
+	                            , [ self.USD, self.BTC, self.EUR ], callback );
+	                    }
+					};
+
+                    fetch(params);
 				},
-                getRates : function ( callback ) {
+				getRates : function ( error, callback ) {
 
-                    var curr = ['USD','EUR'];
+					var curr = ['USD','EUR'];
 
-                    var inserted = 0;
+					var inserted = 0;
 
-                    for(var i = 0; i < curr.length; i++) {
-                        (function(i) {
-                            fetch('/api/1/BTC' + curr[i] + '/public/ticker','','GET', function(error){ throw error }, function(data){
+					for(var i = 0; i < curr.length; i++) {
+					 (function(i) {
 
-                                try {
-                                    var json = JSON.parse(data);
-                                } catch ( err ) {
-                                    throw err;
-                                }
+						 var retry = 3;
 
-                                if ( json.result != 'success' ){
-                                    throw "MtGOX " + curr[i] + " ticker response error";
-                                    return;
-                                }
+						 var error_handler = function(err){
 
-                                console.log( curr[i] + " - " + json.return.buy.value + " - " + json.return.sell.value );
+														if ( retry == 0 ){
+															throw err;
+															return;
+														}
 
-                                db.query(
-                                        "UPDATE Rates SET Bid = ?, Ask = ?, Dt = NOW() " +
-                                        "WHERE Exchanges_Id = 1 AND Currencies_Id IN " +
-                                            "(SELECT Id FROM Currencies WHERE Symbol = '" + curr[i] + "')",
-                                        [ json.return.buy.value, json.return.sell.value]
-                                );
+														logger(err, false);
+														console.log("Retrying - " + retry + " retry left " + params.url );
+														retry--;
 
-                                if ( ++inserted == curr.length ){
-                                  db.end();
-                                  callback();
-                                }
-                            });
-                        })(i);
-                    }
-                }
+														fetch(params);
+													};
+
+							var params = {
+								url         : '/api/1/BTC' + curr[i] + '/public/ticker',
+								error       : error_handler,
+								callback    : function(data){
+
+									try {
+										var json = JSON.parse(data);
+									} catch ( err ) {
+										error_handler( err );
+										return;
+									}
+
+									if ( json.error ){
+										error_handler( new Error( json.error ) );
+										return;
+									}
+
+									db.query(
+									       "UPDATE Rates SET Bid = ?, Ask = ?, Dt = NOW() " +
+									       "WHERE Exchanges_Id = 1 AND Currencies_Id IN " +
+									           "(SELECT Id FROM Currencies WHERE Symbol = '" + curr[i] + "')",
+									       [ json.return.buy.value, json.return.sell.value]
+									);
+
+									if ( ++inserted == curr.length ){
+										db.end();
+										callback();
+									}
+								}
+							};
+
+							fetch(params);
+					 })(i);
+					}
+				}
 	}
 };
