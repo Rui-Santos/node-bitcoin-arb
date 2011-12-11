@@ -34,6 +34,26 @@ var MTGOX = module.exports = function ( key, secret ) {
 		}
 	}
 
+	var update_orders = function( orders, callback ){
+
+		var orders_sql = '';
+
+		// TODO delete missing orders
+
+		orders.forEach(function(order){
+			orders_sql = "INSERT DELAYED INTO " +
+					"Orders( Exchanges_Id, Currencies_Id, OID, Status, BuySell, Dt, Amount, Price ) " +
+					"SELECT 1, Id, ? , ? , ? , FROM_UNIXTIME(?), ?, ? " +
+					"FROM Currencies WHERE Symbol = ? " +
+					"ON DUPLICATE KEY UPDATE " +
+					"   Status = VALUES(Status)";
+
+			db.query( orders_sql, [ order.oid, order.status, order.type, order.date, order.amount, order.price, order.currency] );
+		});
+
+		callback();
+	}
+
 	var fetch = function( params ){
 
 		/* url, data, method, error, callback */
@@ -83,6 +103,8 @@ var MTGOX = module.exports = function ( key, secret ) {
 			var hash            = crypto.createHmac('sha512', secret_binary );
 
 			post_http_options.headers['Rest-Sign'] = hash.update(post_data_string).digest('base64');
+
+			//console.log(post_data_string);
 
 			var request = https.request( post_http_options , take_response ).on('error', params.error );
 
@@ -216,6 +238,71 @@ var MTGOX = module.exports = function ( key, secret ) {
 							fetch(params);
 					 })(i);
 					}
+				},
+				buy : function ( input_params ) {
+
+					if ( input_params.amount <= 0 ){
+
+						var err = new Error('Amount is incorrect : ' + input_params.amount );
+
+						if ( input_params.error ){
+							input_params.error( err );
+							return;
+						}else{
+							throw err;
+						}
+					}
+
+					if ( !input_params.currency ){
+						input_params.currency = 'USD';
+					}
+
+
+					var self = this;
+
+					var retry = 3;
+
+					var error_handler = function(err){
+
+												if ( retry == 0 ){
+													throw err;
+													return;
+												}
+
+												logger(err, false);
+												console.log("Retrying - " + retry + " retry left");
+												retry--;
+
+												fetch(params);
+											};
+
+					var params = {
+						url         : '/api/0/buyBTC.php',
+						data        : {
+										amount      : input_params.amount,
+										Currency    : input_params.currency
+									},
+						error       : error_handler,
+						callback    : function( data ){
+							try {
+							   var json = JSON.parse(data);
+							} catch ( err ) {
+								error_handler( err );
+								return;
+							}
+
+							if ( json.error ){
+								error_handler( new Error( json.error ) );
+								return;
+							}
+
+							update_orders( json.orders, input_params.callback );
+						}
+					};
+
+					if ( input_params.price ) params.data.price = input_params.price;
+
+					fetch(params);
 				}
 	}
 };
