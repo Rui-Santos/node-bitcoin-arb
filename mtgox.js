@@ -41,6 +41,9 @@ var MTGOX = module.exports = function ( key, secret ) {
 		var orders_sql = '';
 
 		orders.forEach(function(order){
+
+			var buysell = order.type == 1 ? 'sell' : 'buy';
+
 			orders_sql = "INSERT DELAYED INTO " +
 					"Orders( Exchanges_Id, Currencies_Id, OID, Status, BuySell, Dt, Amount, Price ) " +
 					"SELECT 1, Id, ? , ? , ? , FROM_UNIXTIME(?), ?, ? " +
@@ -48,7 +51,7 @@ var MTGOX = module.exports = function ( key, secret ) {
 					"ON DUPLICATE KEY UPDATE " +
 					"   Status = VALUES(Status)";
 
-			db.query( orders_sql, [ order.oid, order.status, order.type, order.date, order.amount, order.price, order.currency] );
+			db.query( orders_sql, [ order.oid, order.status, buysell, order.date, order.amount, order.price, order.currency] );
 
 			order_ids.push(order.oid);
 		});
@@ -119,13 +122,58 @@ var MTGOX = module.exports = function ( key, secret ) {
 
 	var setBalance = function( symbol, val ){
 		this[symbol] = val;
-		db.query("UPDATE Exchanges SET `" + symbol + "` = " + val + " WHERE Id = 1");
+		db.query("UPDATE Exchanges SET `" + symbol + "` = " + val + ", Dt = NOW() WHERE Id = 1");
 	}
 
 	return {
 				USD : -1,
 				BTC : -1,
                 EUR : -1,
+				getOrders : function ( error, callback ) {
+
+					var self = this;
+
+					var retry = 3;
+
+					var error_handler = function(err){
+
+												if ( retry == 0 ){
+													throw err;
+													return;
+												}
+
+												logger(err, false);
+												console.log("Retrying - " + retry + " retry left");
+												retry--;
+
+												fetch(params);
+											};
+
+					var params = {
+						url         : '/api/0/getOrders.php',
+						error       : error_handler,
+						callback    : function( data ){
+							try {
+							   var json = JSON.parse(data);
+							} catch ( err ) {
+								error_handler( err );
+								return;
+							}
+
+							if ( json.error ){
+								error_handler( new Error( json.error ) );
+								return;
+							}
+
+							setBalance('USD', json.usds );
+							setBalance('BTC', json.btcs );
+
+							update_orders( json.orders, callback );
+						}
+					};
+
+		            fetch(params);
+				},
 				getBalance : function ( error, callback ) {
 
 					var self = this;
@@ -294,6 +342,73 @@ var MTGOX = module.exports = function ( key, secret ) {
 								error_handler( err );
 								return;
 							}
+
+							if ( json.error ){
+								error_handler( new Error( json.error ) );
+								return;
+							}
+
+							update_orders( json.orders, input_params.callback );
+						}
+					};
+
+					if ( input_params.price ) params.data.price = input_params.price;
+
+					fetch(params);
+				},
+				sell : function ( input_params ) {
+
+					if ( input_params.amount <= 0 ){
+
+						var err = new Error('Amount is incorrect : ' + input_params.amount );
+
+						if ( input_params.error ){
+							input_params.error( err );
+							return;
+						}else{
+							throw err;
+						}
+					}
+
+					if ( !input_params.currency ){
+						input_params.currency = 'USD';
+					}
+
+
+					var self = this;
+
+					var retry = 3;
+
+					var error_handler = function(err){
+
+												if ( retry == 0 ){
+													throw err;
+													return;
+												}
+
+												logger(err, false);
+												console.log("Retrying - " + retry + " retry left");
+												retry--;
+
+												fetch(params);
+											};
+
+					var params = {
+						url         : '/api/0/sellBTC.php',
+						data        : {
+										amount      : input_params.amount,
+										Currency    : input_params.currency
+									},
+						error       : error_handler,
+						callback    : function( data ){
+							try {
+							   var json = JSON.parse(data);
+							} catch ( err ) {
+								error_handler( err );
+								return;
+							}
+
+							console.log(json);
 
 							if ( json.error ){
 								error_handler( new Error( json.error ) );
