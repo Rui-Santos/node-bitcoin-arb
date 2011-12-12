@@ -121,6 +121,11 @@ var MTGOX = module.exports = function ( key, secret ) {
 	}
 
 	var setBalance = function( symbol, val ){
+
+		if ( !val ){
+			return;
+		}
+
 		this[symbol] = val;
 		db.query("UPDATE Exchanges SET `" + symbol + "` = " + val + ", Dt = NOW() WHERE Id = 1");
 	}
@@ -169,6 +174,7 @@ var MTGOX = module.exports = function ( key, secret ) {
 
 							setBalance('USD', json.usds );
 							setBalance('BTC', json.btcs );
+							setBalance('EUR', json.eurs );
 
 							update_orders( json.orders, callback );
 						}
@@ -215,21 +221,11 @@ var MTGOX = module.exports = function ( key, secret ) {
 								return;
 							}
 
-	                        self.USD = json.Wallets.USD.Balance.value;
-	                        self.BTC = json.Wallets.BTC.Balance.value;
+							setBalance('USD', json.Wallets.USD.Balance.value );
+							setBalance('BTC', json.Wallets.BTC.Balance.value );
+							setBalance('EUR', json.Wallets.EUR.Balance.value );
 
-	                        if ( json.Wallets.EUR ){
-	                            self.EUR = json.Wallets.EUR.Balance.value;
-	                        }else{
-	                            self.EUR = -1;
-	                        }
-
-	                        db.query(
-	                            "UPDATE `Exchanges` SET " +
-	                            "   `USD` = ?, BTC = ?, EUR = ?, Dt = NOW()" +
-	                            "WHERE" +
-	                            "   Code = 'mtgox'"
-	                            , [ self.USD, self.BTC, self.EUR ], callback );
+							callback();
 	                    }
 					};
 
@@ -274,6 +270,8 @@ var MTGOX = module.exports = function ( key, secret ) {
 										return;
 									}
 
+									console.log("Got " + curr[i] + " rates at MtGOX");
+
 									if ( json.error ){
 										error_handler( new Error( json.error ) );
 										return;
@@ -287,7 +285,6 @@ var MTGOX = module.exports = function ( key, secret ) {
 									);
 
 									if ( ++inserted == curr.length ){
-										db.end();
 										callback();
 									}
 								}

@@ -1,6 +1,6 @@
 var db = require("./mysql");
 
-var MTGOX = module.exports = function ( key, secret ) {
+var TRADEHILL = module.exports = function ( key, secret ) {
 
 	var get_http_options = {
                         host    : 'api.tradehill.com',
@@ -20,16 +20,64 @@ var MTGOX = module.exports = function ( key, secret ) {
 								}
                         };
 
-	var error_wrapper = function( msg ){
-		console.log( Date.now() + " Error - MTGOX : " + msg );
+	var logger = function( err, throw_exception ){
+
+		var time = new Date();
+
+		console.error( time.toUTCString() + " - TradeHill - " + err.message );
+
+		if ( throw_exception ){
+			throw err;
+		}
 	}
 
-	var fetch = function( url, data, method, error, callback ){
+	var update_orders = function( orders, callback ){
 
-		if ( !url ){
-			error_wrapper("No URL specified");
-			error('No URL specified');
-			return;
+		var order_ids = [];
+
+		var orders_sql = '';
+
+		orders.forEach(function(order){
+
+			console.log(order);
+
+			var buysell = order.type == 1 ? 'sell' : 'buy';
+
+			orders_sql = "INSERT DELAYED INTO " +
+					"Orders( Exchanges_Id, Currencies_Id, OID, Status, BuySell, Dt, Amount, Price ) " +
+					"SELECT 2, Id, ? , ? , ? , FROM_UNIXTIME(?), ?, ? " +
+					"FROM Currencies WHERE Symbol = ? " +
+					"ON DUPLICATE KEY UPDATE " +
+					"   Status = VALUES(Status)";
+
+			db.query( orders_sql, [ order.oid, order.status, buysell, order.date, order.amount, order.price, order.reserved_currency] );
+
+			order_ids.push(order.oid);
+
+			// TODO fix reserved currency
+		});
+
+		var not_in_delete_oids = order_ids.join("','");
+
+		db.query("DELETE FROM Orders WHERE OID NOT IN ('" + not_in_delete_oids + "') AND Exchanges_Id = 2", callback);
+	}
+
+	var fetch = function( params ){
+
+		/* url, data, method, error, callback */
+
+		if ( !params.url ){
+			logger( new Error('No URL given'), true );
+		}
+
+		if ( params.data ){
+			params.data.name = key;
+			params.data.pass = secret;
+		}else{
+			params.data = {
+				name    : key,
+				pass    : secret
+			};
 		}
 
 		var https   = require('https');
@@ -37,124 +85,410 @@ var MTGOX = module.exports = function ( key, secret ) {
 
 		var take_response = function(res){
 
-				var whole_response = '';
+			var whole_response = '';
 
-				res.on('data', function(chunk){
-					whole_response += chunk;
-				});
-
-				res.on('end', function(){
-					callback( whole_response );
-				});
-
-		};
-
-		if ( method == 'GET' ){
-
-			get_http_options.path = url;
-
-			if ( data ){
-				get_http_options.path += "?" + qs.stringify(data);
-			}
-
-			var request = https.get( get_http_options , take_response ).on('error', function(e) {
-                console.log("Transport layer at TradeHill");
-                error(e);
+			res.on('data', function(chunk){
+				whole_response += chunk;
 			});
 
+			res.on('end', function(){
+				return params.callback( whole_response );
+			});
+		};
+
+		if ( params.method && params.method == 'GET' ){
+
+			get_http_options.path = params.url;
+
+			get_http_options.path += "?" + qs.stringify( params.data );
+
+			var request = https.get( get_http_options , take_response ).on('error', params.error );
 			request.end();
 
 		}else{
 
-			post_http_options.path = url;
+			post_http_options.path = params.url;
 
-            var post_data;
+			var post_data_string    = qs.stringify( params.data );
 
-            if ( data ){
-                post_data = data;
-                post_data['name'] = key;
-                post_data['pass'] = secret;
-            }else{
-                post_data = { name: key, pass: secret };
-            }
+			post_http_options.headers['Content-Length'] = post_data_string.length;
 
-			var post_data_string    = qs.stringify( post_data );
+			//console.log(post_data_string);
 
-            post_http_options.headers['Content-Length'] = post_data_string.length;
-
-			var request = https.request( post_http_options , take_response ).on('error', function(e) {
-				console.log("Transport layer at TradeHill");
-				error(e);
-			});
+			var request = https.request( post_http_options , take_response ).on('error', params.error );
 
 			request.write(post_data_string);
 			request.end();
 		}
 	}
 
+	var setBalance = function( symbol, val ){
+
+		if ( !val ){
+			return;
+		}
+
+		this[symbol] = val;
+		db.query("UPDATE Exchanges SET `" + symbol + "` = " + val + ", Dt = NOW() WHERE Id = 2");
+	}
+
 	return {
 				USD : -1,
 				BTC : -1,
                 EUR : -1,
-				getBalance : function ( callback ) {
-                    var self = this;
+				getOrders : function ( error, callback ) {
 
-                    fetch('/APIv1/USD/GetBalance','','POST', function(error){ throw error }, function(data){
+					console.log("Getting open orders at TradeHill");
 
-                        try {
-                            var json = JSON.parse(data);
-                        } catch ( err ) {
-                            throw err;
-                        }
+					var self = this;
 
-                        self.USD = json.USD;
-                        self.BTC = json.BTC;
+					var retry = 3;
 
-                        if ( json.EUR ){
-                            self.EUR = json.EUR;
-                        }else{
-                            self.EUR = -1;
-                        }
+					var error_handler = function(err){
 
-                        db.query(
-                            "UPDATE `Exchanges` SET " +
-                            "   `USD` = ?, BTC = ?, EUR = ?, Dt = NOW()" +
-                            "WHERE" +
-                            "   Code = 'th'"
-                            , [ self.USD, self.BTC, self.EUR ], callback );
-                    });
+												if ( retry == 0 ){
+													throw err;
+													return;
+												}
+
+												logger(err, false);
+												console.log("Retrying - " + retry + " retry left");
+												retry--;
+
+												fetch(params);
+											};
+
+					var params = {
+						url         : '/APIv1/USD/GetOrders',
+						error       : error_handler,
+						callback    : function( data ){
+							try {
+							   var json = JSON.parse(data);
+							} catch ( err ) {
+								error_handler( err );
+								return;
+							}
+
+							console.log(json);
+
+							if ( json.error ){
+								error_handler( new Error( json.error ) );
+								return;
+							}
+
+							update_orders( json.orders, callback );
+						}
+					};
+
+		            fetch(params);
 				},
-                getRates : function ( callback ) {
+				getBalance : function ( error, callback ) {
 
-                    var curr = ['USD','EUR'];
+					console.log("Getting balance at TradeHill");
 
-                    var inserted = 0;
+					var self = this;
 
-                    for(var i = 0; i < curr.length; i++) {
-                        (function(i) {
-                            fetch('/APIv1/' + curr[i] + '/Ticker','','GET', function(error){ throw error }, function(data){
-                                try {
-                                    var json = JSON.parse(data);
-                                } catch ( err ) {
-                                    throw err;
-                                }
+					var retry = 3;
 
-                                console.log( curr[i] + " - " + json.ticker.buy + " - " + json.ticker.sell );
+					var error_handler = function(err){
 
-                                db.query(
-                                        "UPDATE Rates SET Bid = ?, Ask = ?, Dt = NOW() " +
-                                        "WHERE Exchanges_Id = 2 AND Currencies_Id = " +
-                                            "( SELECT Id FROM Currencies WHERE Symbol = '" + curr[i] + "' )",
-                                        [ json.ticker.buy, json.ticker.sell ]
-                                );
+												if ( retry == 0 ){
+													throw err;
+													return;
+												}
 
-                                if ( ++inserted == curr.length ){
-                                  db.end();
-                                  callback();
-                                }
-                            });
-                        })(i);
-                    }
-                }
+												logger(err, false);
+												console.log("Retrying - " + retry + " retry left");
+												retry--;
+
+												fetch(params);
+											};
+
+					var params = {
+						url         : '/APIv1/USD/GetBalance',
+						error       : error_handler,
+						callback    : function(data){
+
+	                        try {
+	                            var json = JSON.parse(data);
+	                        } catch ( err ) {
+		                        error_handler( err );
+								return;
+	                        }
+
+							if ( json.error ){
+								error_handler( new Error( json.error ) );
+								return;
+							}
+
+							setBalance('USD', json.USD );
+							setBalance('BTC', json.BTC );
+							setBalance('EUR', json.EUR );
+
+							callback();
+	                    }
+					};
+
+                    fetch(params);
+				},
+				getRates : function ( error, callback ) {
+
+					console.log("Getting rates at TradeHill");
+
+					var curr = ['USD','EUR'];
+
+					var inserted = 0;
+
+					for(var i = 0; i < curr.length; i++) {
+					 (function(i) {
+
+						 var retry = 3;
+
+						 var error_handler = function(err){
+
+														if ( retry == 0 ){
+															throw err;
+															return;
+														}
+
+														logger(err, false);
+														console.log("Retrying - " + retry + " retry left " + params.url );
+														retry--;
+
+														fetch(params);
+													};
+
+							var params = {
+								url         : '/APIv1/' + curr[i] + '/Ticker',
+								error       : error_handler,
+								callback    : function(data){
+
+									try {
+										var json = JSON.parse(data);
+									} catch ( err ) {
+										error_handler( err );
+										return;
+									}
+
+									console.log("Got " + curr[i] + " rates at TradeHill");
+
+									if ( json.error ){
+										error_handler( new Error( json.error ) );
+										return;
+									}
+
+									db.query(
+									       "UPDATE Rates SET Bid = ?, Ask = ?, Dt = NOW() " +
+									       "WHERE Exchanges_Id = 2 AND Currencies_Id IN " +
+									           "(SELECT Id FROM Currencies WHERE Symbol = '" + curr[i] + "')",
+									       [ json.ticker.buy, json.ticker.sell]
+									);
+
+									if ( ++inserted == curr.length ){
+										callback();
+									}
+								}
+							};
+
+							fetch(params);
+					 })(i);
+					}
+				},
+				buy : function ( input_params ) {
+
+					console.log("Buying " + input_params.amount + " at MtGOX");
+
+					if ( input_params.amount <= 0 ){
+
+						var err = new Error('Amount is incorrect : ' + input_params.amount );
+
+						if ( input_params.error ){
+							input_params.error( err );
+							return;
+						}else{
+							throw err;
+						}
+					}
+
+					if ( !input_params.currency ){
+						input_params.currency = 'USD';
+					}
+
+
+					var self = this;
+
+					var retry = 3;
+
+					var error_handler = function(err){
+
+												if ( retry == 0 ){
+													throw err;
+													return;
+												}
+
+												logger(err, false);
+												console.log("Retrying - " + retry + " retry left");
+												retry--;
+
+												fetch(params);
+											};
+
+					var params = {
+						url         : '/api/0/buyBTC.php',
+						data        : {
+										amount      : input_params.amount,
+										Currency    : input_params.currency
+									},
+						error       : error_handler,
+						callback    : function( data ){
+							try {
+							   var json = JSON.parse(data);
+							} catch ( err ) {
+								error_handler( err );
+								return;
+							}
+
+							if ( json.error ){
+								error_handler( new Error( json.error ) );
+								return;
+							}
+
+							update_orders( json.orders, input_params.callback );
+						}
+					};
+
+					if ( input_params.price ) params.data.price = input_params.price;
+
+					fetch(params);
+				},
+				sell : function ( input_params ) {
+
+					console.log("Selling " + input_params.amount + " at MtGOX");
+
+					if ( input_params.amount <= 0 ){
+
+						var err = new Error('Amount is incorrect : ' + input_params.amount );
+
+						if ( input_params.error ){
+							input_params.error( err );
+							return;
+						}else{
+							throw err;
+						}
+					}
+
+					if ( !input_params.currency ){
+						input_params.currency = 'USD';
+					}
+
+
+					var self = this;
+
+					var retry = 3;
+
+					var error_handler = function(err){
+
+												if ( retry == 0 ){
+													throw err;
+													return;
+												}
+
+												logger(err, false);
+												console.log("Retrying - " + retry + " retry left");
+												retry--;
+
+												fetch(params);
+											};
+
+					var params = {
+						url         : '/api/0/sellBTC.php',
+						data        : {
+										amount      : input_params.amount,
+										Currency    : input_params.currency
+									},
+						error       : error_handler,
+						callback    : function( data ){
+							try {
+							   var json = JSON.parse(data);
+							} catch ( err ) {
+								error_handler( err );
+								return;
+							}
+
+							console.log(json);
+
+							if ( json.error ){
+								error_handler( new Error( json.error ) );
+								return;
+							}
+
+							update_orders( json.orders, input_params.callback );
+						}
+					};
+
+					if ( input_params.price ) params.data.price = input_params.price;
+
+					fetch(params);
+				},
+				cancel : function ( input_params ) {
+
+					if ( !input_params.oid ){
+
+						var err = new Error('No order id supplied');
+
+						if ( input_params.error ){
+							input_params.error( err );
+							return;
+						}else{
+							throw err;
+						}
+					}
+
+					var self = this;
+
+					var retry = 3;
+
+					var error_handler = function(err){
+
+												if ( retry == 0 ){
+													throw err;
+													return;
+												}
+
+												logger(err, false);
+												console.log("Retrying - " + retry + " retry left");
+												retry--;
+
+												fetch(params);
+											};
+
+					var params = {
+						url         : '/api/0/cancelOrder.php',
+						data        : {
+										oid     : input_params.oid
+									},
+						error       : error_handler,
+						callback    : function( data ){
+							try {
+							   var json = JSON.parse(data);
+							} catch ( err ) {
+								error_handler( err );
+								return;
+							}
+
+							if ( json.error ){
+								error_handler( new Error( json.error ) );
+								return;
+							}
+
+							setBalance('USD', json.usds );
+							setBalance('BTC', json.btcs );
+
+							update_orders( json.orders, input_params.callback );
+						}
+					};
+
+					fetch(params);
+				}
 	}
 };
