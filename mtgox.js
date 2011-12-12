@@ -36,9 +36,9 @@ var MTGOX = module.exports = function ( key, secret ) {
 
 	var update_orders = function( orders, callback ){
 
-		var orders_sql = '';
+		var order_ids = [];
 
-		// TODO delete missing orders
+		var orders_sql = '';
 
 		orders.forEach(function(order){
 			orders_sql = "INSERT DELAYED INTO " +
@@ -49,9 +49,13 @@ var MTGOX = module.exports = function ( key, secret ) {
 					"   Status = VALUES(Status)";
 
 			db.query( orders_sql, [ order.oid, order.status, order.type, order.date, order.amount, order.price, order.currency] );
+
+			order_ids.push(order.oid);
 		});
 
-		callback();
+		var not_in_delete_oids = order_ids.join("','");
+
+		db.query("DELETE FROM Orders WHERE OID NOT IN ('" + not_in_delete_oids + "') AND Exchanges_Id = 1", callback);
 	}
 
 	var fetch = function( params ){
