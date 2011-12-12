@@ -131,6 +131,8 @@ var MTGOX = module.exports = function ( key, secret ) {
                 EUR : -1,
 				getOrders : function ( error, callback ) {
 
+					console.log("Getting open orders at MtGOX");
+
 					var self = this;
 
 					var retry = 3;
@@ -175,6 +177,8 @@ var MTGOX = module.exports = function ( key, secret ) {
 		            fetch(params);
 				},
 				getBalance : function ( error, callback ) {
+
+					console.log("Getting balance at MtGOX");
 
 					var self = this;
 
@@ -232,6 +236,8 @@ var MTGOX = module.exports = function ( key, secret ) {
                     fetch(params);
 				},
 				getRates : function ( error, callback ) {
+
+					console.log("Getting rates at MtGOX");
 
 					var curr = ['USD','EUR'];
 
@@ -292,6 +298,8 @@ var MTGOX = module.exports = function ( key, secret ) {
 					}
 				},
 				buy : function ( input_params ) {
+
+					console.log("Buying " + input_params.amount + " at MtGOX");
 
 					if ( input_params.amount <= 0 ){
 
@@ -358,6 +366,8 @@ var MTGOX = module.exports = function ( key, secret ) {
 				},
 				sell : function ( input_params ) {
 
+					console.log("Selling " + input_params.amount + " at MtGOX");
+
 					if ( input_params.amount <= 0 ){
 
 						var err = new Error('Amount is incorrect : ' + input_params.amount );
@@ -420,6 +430,66 @@ var MTGOX = module.exports = function ( key, secret ) {
 					};
 
 					if ( input_params.price ) params.data.price = input_params.price;
+
+					fetch(params);
+				},
+				cancel : function ( input_params ) {
+
+					if ( !input_params.oid ){
+
+						var err = new Error('No order id supplied');
+
+						if ( input_params.error ){
+							input_params.error( err );
+							return;
+						}else{
+							throw err;
+						}
+					}
+
+					var self = this;
+
+					var retry = 3;
+
+					var error_handler = function(err){
+
+												if ( retry == 0 ){
+													throw err;
+													return;
+												}
+
+												logger(err, false);
+												console.log("Retrying - " + retry + " retry left");
+												retry--;
+
+												fetch(params);
+											};
+
+					var params = {
+						url         : '/api/0/cancelOrder.php',
+						data        : {
+										oid     : input_params.oid
+									},
+						error       : error_handler,
+						callback    : function( data ){
+							try {
+							   var json = JSON.parse(data);
+							} catch ( err ) {
+								error_handler( err );
+								return;
+							}
+
+							if ( json.error ){
+								error_handler( new Error( json.error ) );
+								return;
+							}
+
+							setBalance('USD', json.usds );
+							setBalance('BTC', json.btcs );
+
+							update_orders( json.orders, input_params.callback );
+						}
+					};
 
 					fetch(params);
 				}
