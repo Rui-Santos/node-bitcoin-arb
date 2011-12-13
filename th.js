@@ -31,7 +31,7 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 		}
 	}
 
-	var update_orders = function( symbol, orders ){
+	var update_orders = function( symbol, orders, callback ){
 
 		var order_ids = [];
 
@@ -51,6 +51,10 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 			db.query( orders_sql, [ order.oid, order.status, buysell, order.date, order.amount, order.price, symbol] );
 
 			order_ids.push(order.oid);
+
+			if ( callback ){
+				return callback();
+			}
 		});
 
 		var not_in_delete_oids = order_ids.join("','");
@@ -180,7 +184,9 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 									console.log("Got open orders at TradeHill for " + curr[i] );
 
 									if ( ++inserted == curr.length ){
-										callback();
+										if ( callback ){
+											return callback();
+										}
 									}
 								}
 							};
@@ -237,7 +243,9 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 									console.log("Got balance at TradeHill for " + curr[i] );
 
 									if ( ++inserted == curr.length ){
-										callback();
+										if ( callback ){
+											return callback();
+										}
 									}
 								}
 							};
@@ -302,7 +310,9 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 									);
 
 									if ( ++inserted == curr.length ){
-										callback();
+										if ( callback ){
+											return callback();
+										}
 									}
 								}
 							};
@@ -313,7 +323,7 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 				},
 				buy : function ( input_params ) {
 
-					console.log("Buying " + input_params.amount + " at MtGOX");
+					console.log("Buying " + input_params.amount + " at TradeHill");
 
 					if ( input_params.amount <= 0 ){
 
@@ -331,6 +341,9 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 						input_params.currency = 'USD';
 					}
 
+					if ( !input_params.price ){
+						input_params.price = 9999999999;
+					}
 
 					var self = this;
 
@@ -351,10 +364,10 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 											};
 
 					var params = {
-						url         : '/api/0/buyBTC.php',
+						url         : '/APIv1/' + input_params.currency + '/BuyBTC',
 						data        : {
 										amount      : input_params.amount,
-										Currency    : input_params.currency
+										price       : input_params.price
 									},
 						error       : error_handler,
 						callback    : function( data ){
@@ -370,82 +383,83 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 								return;
 							}
 
-							update_orders( json.orders, input_params.callback );
+							update_orders( input_params.currency, json.orders, input_params.callback );
+
+							console.log("Bought " + input_params.amount + " at TradeHill");
 						}
 					};
-
-					if ( input_params.price ) params.data.price = input_params.price;
 
 					fetch(params);
 				},
 				sell : function ( input_params ) {
 
-					console.log("Selling " + input_params.amount + " at MtGOX");
+						console.log("Selling " + input_params.amount + " at TradeHill");
 
-					if ( input_params.amount <= 0 ){
+						if ( input_params.amount <= 0 ){
 
-						var err = new Error('Amount is incorrect : ' + input_params.amount );
+							var err = new Error('Amount is incorrect : ' + input_params.amount );
 
-						if ( input_params.error ){
-							input_params.error( err );
-							return;
-						}else{
-							throw err;
-						}
-					}
-
-					if ( !input_params.currency ){
-						input_params.currency = 'USD';
-					}
-
-
-					var self = this;
-
-					var retry = 3;
-
-					var error_handler = function(err){
-
-												if ( retry == 0 ){
-													throw err;
-													return;
-												}
-
-												logger(err, false);
-												console.log("Retrying - " + retry + " retry left");
-												retry--;
-
-												fetch(params);
-											};
-
-					var params = {
-						url         : '/api/0/sellBTC.php',
-						data        : {
-										amount      : input_params.amount,
-										Currency    : input_params.currency
-									},
-						error       : error_handler,
-						callback    : function( data ){
-							try {
-							   var json = JSON.parse(data);
-							} catch ( err ) {
-								error_handler( err );
+							if ( input_params.error ){
+								input_params.error( err );
 								return;
+							}else{
+								throw err;
 							}
-
-							console.log(json);
-
-							if ( json.error ){
-								error_handler( new Error( json.error ) );
-								return;
-							}
-
-							update_orders( json.orders, input_params.callback );
 						}
-					};
 
-					if ( input_params.price ) params.data.price = input_params.price;
+						if ( !input_params.currency ){
+							input_params.currency = 'USD';
+						}
 
-					fetch(params);
+						if ( !input_params.price ){
+							input_params.price = 0.00001;
+						}
+
+						var self = this;
+
+						var retry = 3;
+
+						var error_handler = function(err){
+
+													if ( retry == 0 ){
+														throw err;
+														return;
+													}
+
+													logger(err, false);
+													console.log("Retrying - " + retry + " retry left");
+													retry--;
+
+													fetch(params);
+												};
+
+						var params = {
+							url         : '/APIv1/' + input_params.currency + '/SellBTC',
+							data        : {
+											amount      : input_params.amount,
+											price       : input_params.price
+										},
+							error       : error_handler,
+							callback    : function( data ){
+								try {
+								   var json = JSON.parse(data);
+								} catch ( err ) {
+									error_handler( err );
+									return;
+								}
+
+								if ( json.error ){
+									error_handler( new Error( json.error ) );
+									return;
+								}
+
+								update_orders( input_params.currency, json.orders, input_params.callback );
+
+								console.log("Sold " + input_params.amount + " at TradeHill");
+							}
+						};
+
+						fetch(params);
 				},
 				cancel : function ( input_params ) {
 
@@ -461,6 +475,10 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 						}
 					}
 
+					if ( !input_params.currency ){
+						input_params.currency = 'USD';
+					}
+
 					var self = this;
 
 					var retry = 3;
@@ -480,9 +498,9 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 											};
 
 					var params = {
-						url         : '/api/0/cancelOrder.php',
+						url         : '/APIv1/' + input_params.currency + '/CancelOrder',
 						data        : {
-										oid     : input_params.oid
+										oid       : input_params.oid
 									},
 						error       : error_handler,
 						callback    : function( data ){
@@ -498,10 +516,9 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 								return;
 							}
 
-							setBalance('USD', json.usds );
-							setBalance('BTC', json.btcs );
+							update_orders( input_params.currency, json.orders, input_params.callback );
 
-							update_orders( json.orders, input_params.callback );
+							console.log("Cancelled order  " + input_params.oid + " at TradeHill");
 						}
 					};
 
