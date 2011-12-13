@@ -193,52 +193,60 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 				},
 				getBalance : function ( error, callback ) {
 
-					console.log("Getting balance at TradeHill");
+					var curr = ['USD','EUR'];
 
-					var self = this;
+					var inserted = 0;
 
-					var retry = 3;
+					for(var i = 0; i < curr.length; i++) {
+					 (function(i) {
 
-					var error_handler = function(err){
+							var retry = 3;
 
-												if ( retry == 0 ){
-													throw err;
-													return;
-												}
+							var error_handler = function(err){
 
-												logger(err, false);
-												console.log("Retrying - " + retry + " retry left");
-												retry--;
+														if ( retry == 0 ){
+															throw err;
+															return;
+														}
 
-												fetch(params);
-											};
+														logger(err, false);
+														console.log("Retrying - " + retry + " retry left");
+														retry--;
 
-					var params = {
-						url         : '/APIv1/USD/GetBalance',
-						error       : error_handler,
-						callback    : function(data){
+														fetch(params);
+													};
 
-	                        try {
-	                            var json = JSON.parse(data);
-	                        } catch ( err ) {
-		                        error_handler( err );
-								return;
-	                        }
+							var params = {
+								url         : '/APIv1/' + curr[i] + '/GetBalance',
+								error       : error_handler,
+								callback    : function( data ){
+									try {
+									   var json = JSON.parse(data);
+									} catch ( err ) {
+										error_handler( err );
+										return;
+									}
 
-							if ( json.error ){
-								error_handler( new Error( json.error ) );
-								return;
-							}
+									if ( json.error ){
+										error_handler( new Error( json.error ) );
+										return;
+									}
 
-							setBalance('USD', json.USD );
-							setBalance('BTC', json.BTC );
-							setBalance('EUR', json.EUR );
+									setBalance(curr[i] , json[curr[i]] );
 
-							callback();
-	                    }
-					};
+									console.log("Got balance at TradeHill for " + curr[i] );
 
-                    fetch(params);
+									if ( ++inserted == curr.length ){
+										callback();
+									}
+								}
+							};
+
+						    console.log("Getting balance at TradeHill for " + curr[i] );
+
+				            fetch(params);
+					 })(i);
+					}
 				},
 				getRates : function ( error, callback ) {
 
