@@ -31,15 +31,13 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 		}
 	}
 
-	var update_orders = function( orders, callback ){
+	var update_orders = function( symbol, orders ){
 
 		var order_ids = [];
 
 		var orders_sql = '';
 
 		orders.forEach(function(order){
-
-			console.log(order);
 
 			var buysell = order.type == 1 ? 'sell' : 'buy';
 
@@ -50,16 +48,16 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 					"ON DUPLICATE KEY UPDATE " +
 					"   Status = VALUES(Status)";
 
-			db.query( orders_sql, [ order.oid, order.status, buysell, order.date, order.amount, order.price, order.reserved_currency] );
+			db.query( orders_sql, [ order.oid, order.status, buysell, order.date, order.amount, order.price, symbol] );
 
 			order_ids.push(order.oid);
-
-			// TODO fix reserved currency
 		});
 
 		var not_in_delete_oids = order_ids.join("','");
 
-		db.query("DELETE FROM Orders WHERE OID NOT IN ('" + not_in_delete_oids + "') AND Exchanges_Id = 2", callback);
+		db.query("DELETE FROM Orders WHERE OID NOT IN ('" + not_in_delete_oids +
+				"') AND Exchanges_Id = 2 AND Currencies_Id = ( SELECT Id FROM Currencies WHERE Symbol = '"
+				+ symbol + "' ) ");
 	}
 
 	var fetch = function( params ){
@@ -138,49 +136,60 @@ var TRADEHILL = module.exports = function ( key, secret ) {
                 EUR : -1,
 				getOrders : function ( error, callback ) {
 
-					console.log("Getting open orders at TradeHill");
+					var curr = ['USD','EUR'];
 
-					var self = this;
+					var inserted = 0;
 
-					var retry = 3;
+					for(var i = 0; i < curr.length; i++) {
+					 (function(i) {
 
-					var error_handler = function(err){
+							var retry = 3;
 
-												if ( retry == 0 ){
-													throw err;
-													return;
-												}
+							var error_handler = function(err){
 
-												logger(err, false);
-												console.log("Retrying - " + retry + " retry left");
-												retry--;
+														if ( retry == 0 ){
+															throw err;
+															return;
+														}
 
-												fetch(params);
-											};
+														logger(err, false);
+														console.log("Retrying - " + retry + " retry left");
+														retry--;
 
-					var params = {
-						url         : '/APIv1/USD/GetOrders',
-						error       : error_handler,
-						callback    : function( data ){
-							try {
-							   var json = JSON.parse(data);
-							} catch ( err ) {
-								error_handler( err );
-								return;
-							}
+														fetch(params);
+													};
 
-							console.log(json);
+							var params = {
+								url         : '/APIv1/' + curr[i] + '/GetOrders',
+								error       : error_handler,
+								callback    : function( data ){
+									try {
+									   var json = JSON.parse(data);
+									} catch ( err ) {
+										error_handler( err );
+										return;
+									}
 
-							if ( json.error ){
-								error_handler( new Error( json.error ) );
-								return;
-							}
+									if ( json.error ){
+										error_handler( new Error( json.error ) );
+										return;
+									}
 
-							update_orders( json.orders, callback );
-						}
-					};
+									update_orders( curr[i], json.orders );
 
-		            fetch(params);
+									console.log("Got open orders at TradeHill for " + curr[i] );
+
+									if ( ++inserted == curr.length ){
+										callback();
+									}
+								}
+							};
+
+						    console.log("Getting open orders at TradeHill for " + curr[i] );
+
+				            fetch(params);
+					 })(i);
+					}
 				},
 				getBalance : function ( error, callback ) {
 
