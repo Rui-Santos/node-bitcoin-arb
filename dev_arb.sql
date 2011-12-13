@@ -3,7 +3,7 @@
 -- http://www.phpmyadmin.net
 --
 -- Host: 10.6.10.156
--- Generation Time: Dec 04, 2011 at 03:27 PM
+-- Generation Time: Dec 13, 2011 at 06:12 PM
 -- Server version: 5.1.49
 -- PHP Version: 5.3.3-7+squeeze3
 
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS `Currencies` (
   `Rate` decimal(8,5) NOT NULL,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `Dt` (`Symbol`)
-) ENGINE=MyISAM  DEFAULT CHARSET=utf8 AUTO_INCREMENT=16 ;
+) ENGINE=MyISAM  DEFAULT CHARSET=utf8;
 
 -- --------------------------------------------------------
 
@@ -52,7 +52,27 @@ CREATE TABLE IF NOT EXISTS `Exchanges` (
   `AUD` decimal(9,2) unsigned NOT NULL,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `Code` (`Code`)
-) ENGINE=MyISAM  DEFAULT CHARSET=utf8 COMMENT='Exchanges' AUTO_INCREMENT=10 ;
+) ENGINE=MyISAM  DEFAULT CHARSET=utf8 COMMENT='Exchanges';
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `Orders`
+--
+
+CREATE TABLE IF NOT EXISTS `Orders` (
+  `Id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `Exchanges_Id` tinyint(3) unsigned NOT NULL,
+  `Currencies_Id` tinyint(3) unsigned NOT NULL,
+  `OID` varchar(100) NOT NULL,
+  `Status` tinyint(4) NOT NULL,
+  `BuySell` enum('buy','sell') NOT NULL,
+  `Dt` datetime NOT NULL,
+  `Amount` decimal(16,8) unsigned NOT NULL,
+  `Price` decimal(11,5) unsigned NOT NULL,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `Exchanges_Id` (`Exchanges_Id`,`OID`)
+) ENGINE=MyISAM  DEFAULT CHARSET=utf8;
 
 -- --------------------------------------------------------
 
@@ -63,6 +83,7 @@ CREATE TABLE IF NOT EXISTS `Exchanges` (
 CREATE TABLE IF NOT EXISTS `Rates` (
   `Exchanges_Id` tinyint(3) unsigned NOT NULL,
   `Currencies_Id` tinyint(4) unsigned NOT NULL,
+  `Dt` datetime NOT NULL,
   `Bid` decimal(8,5) unsigned NOT NULL,
   `Ask` decimal(8,5) unsigned NOT NULL,
   UNIQUE KEY `Exchanges_Id` (`Exchanges_Id`,`Currencies_Id`)
