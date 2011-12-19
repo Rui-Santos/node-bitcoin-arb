@@ -4,7 +4,6 @@ var INTERSANGO = module.exports = function ( key ) {
 
 	var get_http_options = {
 						host    : "intersango.com",
-						port    : "1337",
                         method  : "GET",
 						headers : {
 									'User-Agent'    : 'btb'
@@ -13,8 +12,7 @@ var INTERSANGO = module.exports = function ( key ) {
 
 	var post_http_options = {
 						host    : "intersango.com",
-						port    : "1337",
-                        method  : 'POST',
+                        method  : "POST",
 						headers : {
 									'User-Agent'    : 'btb',
 									'Accept'        : 'application/json',
@@ -135,9 +133,11 @@ var INTERSANGO = module.exports = function ( key ) {
 	}
 
 	return {
-				USD : -1,
-				BTC : -1,
-                EUR : -1,
+				"USD": -1,
+				"BTC": -1,
+                "GBP": -1,
+                "PLN": -1,
+                "EUR": -1,
 				getOrders : function ( error, callback ) {
 
 					var curr = ['USD','EUR'];
@@ -199,62 +199,52 @@ var INTERSANGO = module.exports = function ( key ) {
 				},
 				getBalance : function ( error, callback ) {
 
-					var curr = ['USD','EUR'];
+                    var retry = 3;
+                    var error_handler = function(err){
 
-					var inserted = 0;
+                                        if ( retry == 0 ){
+                                            throw err;
+                                            return;
+                                        }
 
-					for(var i = 0; i < curr.length; i++) {
-					 (function(i) {
+                                        logger(err, false);
+                                        console.log("Retrying - " + retry + " retry left");
+                                        retry--;
 
-							var retry = 3;
+                                        fetch(params);
+                                    };
 
-							var error_handler = function(err){
+                    var params = {
+                        url         : '/api/authenticated/v0.1/listAccounts.php',
+                        error       : error_handler,
+                        callback    : function( data ){
+                                try {
+                                   var json = JSON.parse(data);
+                                } catch ( err ) {
+                                    error_handler( err );
+                                    return;
+                                }
 
-														if ( retry == 0 ){
-															throw err;
-															return;
-														}
+                                if ( json.error ){
+                                    error_handler( new Error( json.error ) );
+                                    return;
+                                }
 
-														logger(err, false);
-														console.log("Retrying - " + retry + " retry left");
-														retry--;
+                                json.forEach(function(acc){
+                                    setBalance( acc.currency_abbreviation , acc.balance );
+                                });
 
-														fetch(params);
-													};
+                                console.log("Got balance at Intersango");
 
-							var params = {
-								url         : '/api/authenticated/v0.1/listAccounts.php',
-								error       : error_handler,
-								callback    : function( data ){
-									try {
-									   var json = JSON.parse(data);
-									} catch ( err ) {
-										error_handler( err );
-										return;
-									}
+                                if ( callback ){
+                                    return callback();
+                                }
+                            }
+                    };
 
-									if ( json.error ){
-										error_handler( new Error( json.error ) );
-										return;
-									}
+                    console.log("Getting balance at Intersango");
 
-									setBalance(curr[i] , json[curr[i]] );
-
-									console.log("Got balance at TradeHill for " + curr[i] );
-
-									if ( ++inserted == curr.length ){
-										if ( callback ){
-											return callback();
-										}
-									}
-								}
-							};
-
-						    console.log("Getting balance at TradeHill for " + curr[i] );
-
-				            fetch(params);
-					 })(i);
-					}
+                    fetch(params);
 				},
 				getRates : function ( error, callback ) {
 
