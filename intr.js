@@ -31,6 +31,15 @@ var INTERSANGO = module.exports = function ( key ) {
 		}
 	}
 
+    var update_rates = function( symbol, bid, ask ){
+        db.query(
+               "UPDATE Rates SET Bid = ?, Ask = ?, Dt = NOW() " +
+               "WHERE Exchanges_Id = 4 AND Currencies_Id IN " +
+                   "(SELECT Id FROM Currencies WHERE Symbol = ?)",
+               [ bid, ask, symbol]
+        );
+    };
+
 	var update_orders = function( symbol, orders, callback ){
 
 		var order_ids = [];
@@ -248,68 +257,55 @@ var INTERSANGO = module.exports = function ( key ) {
 				},
 				getRates : function ( error, callback ) {
 
-					console.log("Getting rates at TradeHill");
+					console.log("Getting rates at Intersango");
 
-					var curr = ['USD','EUR'];
+                    var retry = 3;
 
-					var inserted = 0;
+                    var error_handler = function(err){
 
-					for(var i = 0; i < curr.length; i++) {
-					 (function(i) {
+                                                if ( retry == 0 ){
+                                                    throw err;
+                                                    return;
+                                                }
 
-						 var retry = 3;
+                                                logger(err, false);
+                                                console.log("Retrying - " + retry + " retry left " + params.url );
+                                                retry--;
 
-						 var error_handler = function(err){
+                                                fetch(params);
+                                            };
 
-														if ( retry == 0 ){
-															throw err;
-															return;
-														}
+                    var params = {
+                        url         : '/api/ticker.php',
+                        error       : error_handler,
+                        callback    : function(data){
 
-														logger(err, false);
-														console.log("Retrying - " + retry + " retry left " + params.url );
-														retry--;
+                            try {
+                                var json = JSON.parse(data);
+                            } catch ( err ) {
+                                error_handler( err );
+                                return;
+                            }
 
-														fetch(params);
-													};
+                            if ( json.error ){
+                                error_handler( new Error( json.error ) );
+                                return;
+                            }
 
-							var params = {
-								url         : '/APIv1/' + curr[i] + '/Ticker',
-								error       : error_handler,
-								callback    : function(data){
+                            update_rates( "USD" , json['1'].buy, json['1'].sell );
+                            update_rates( "EUR" , json['2'].buy, json['2'].sell );
 
-									try {
-										var json = JSON.parse(data);
-									} catch ( err ) {
-										error_handler( err );
-										return;
-									}
+                            // TODO - continue all currs
 
-									console.log("Got " + curr[i] + " rates at TradeHill");
+                            console.log("Got rates at Intersango");
 
-									if ( json.error ){
-										error_handler( new Error( json.error ) );
-										return;
-									}
+                            if ( callback ){
+                                return callback();
+                            }
+                        }
+                    };
 
-									db.query(
-									       "UPDATE Rates SET Bid = ?, Ask = ?, Dt = NOW() " +
-									       "WHERE Exchanges_Id = 2 AND Currencies_Id IN " +
-									           "(SELECT Id FROM Currencies WHERE Symbol = '" + curr[i] + "')",
-									       [ json.ticker.buy, json.ticker.sell]
-									);
-
-									if ( ++inserted == curr.length ){
-										if ( callback ){
-											return callback();
-										}
-									}
-								}
-							};
-
-							fetch(params);
-					 })(i);
-					}
+                    fetch(params);
 				},
 				buy : function ( input_params ) {
 
