@@ -3,7 +3,7 @@
 -- http://www.phpmyadmin.net
 --
 -- Host: 10.6.10.156
--- Generation Time: Dec 13, 2011 at 06:12 PM
+-- Generation Time: Dec 20, 2011 at 05:17 PM
 -- Server version: 5.1.49
 -- PHP Version: 5.3.3-7+squeeze3
 
@@ -18,6 +18,25 @@ SET SQL_MODE="NO_AUTO_VALUE_ON_ZERO";
 --
 -- Database: `dev_arb`
 --
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `Arbitrages`
+--
+
+CREATE TABLE IF NOT EXISTS `Arbitrages` (
+  `Id` int(11) unsigned NOT NULL AUTO_INCREMENT,
+  `Dt_Opened` datetime NOT NULL,
+  `Dt_Closed` datetime DEFAULT NULL,
+  `Buying` datetime DEFAULT NULL,
+  `Selling` datetime DEFAULT NULL,
+  `Buy_Exchanges_Id` tinyint(4) unsigned NOT NULL,
+  `Buy_Currencies_Id` tinyint(4) unsigned NOT NULL,
+  `Sell_Exchanges_Id` tinyint(4) unsigned NOT NULL,
+  `Sell_Currencies_Id` tinyint(4) unsigned NOT NULL,
+  PRIMARY KEY (`Id`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
 -- --------------------------------------------------------
 
