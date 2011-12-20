@@ -1,6 +1,10 @@
 var db = require("./mysql");
 
-var INTERSANGO = module.exports = function ( key ) {
+var INTERSANGO = module.exports = function ( key, accounts ) {
+
+	var getAccounts = function(){
+		return accounts;
+	};
 
 	var get_http_options = {
 						host    : "intersango.com",
@@ -48,18 +52,20 @@ var INTERSANGO = module.exports = function ( key ) {
 
 		orders.forEach(function(order){
 
-			var buysell = order.type == 1 ? 'sell' : 'buy';
+			if ( order.fulfilled || order.cancelled ) return;
+
+			var buysell = order.selling == true ? 'sell' : 'buy';
 
 			orders_sql = "INSERT DELAYED INTO " +
 					"Orders( Exchanges_Id, Currencies_Id, OID, Status, BuySell, Dt, Amount, Price ) " +
-					"SELECT 4, Id, ? , ? , ? , FROM_UNIXTIME(?), ?, ? " +
+					"SELECT 4, Id, ? , ? , ? , ?, ?, ? " +
 					"FROM Currencies WHERE Symbol = ? " +
 					"ON DUPLICATE KEY UPDATE " +
-					"   Status = VALUES(Status)";
+					" Status = VALUES(Status)";
 
-			db.query( orders_sql, [ order.oid, order.status, buysell, order.date, order.amount, order.price, symbol] );
+			db.query( orders_sql, [ order.id, 1, buysell, order.placed.substr(0, 19), order.quantity, order.rate, symbol] );
 
-			order_ids.push(order.oid);
+			order_ids.push(order.id);
 
 			if ( callback ){
 				return callback();
@@ -149,12 +155,12 @@ var INTERSANGO = module.exports = function ( key ) {
                 "EUR": -1,
 				getOrders : function ( error, callback ) {
 
-					var curr = ['USD','EUR'];
+					var curr = getAccounts();
 
 					var inserted = 0;
 
-					for(var i = 0; i < curr.length; i++) {
-					 (function(i) {
+					for( var i = 0; i < curr.length; i++ ) {
+					 (function( acc ){
 
 							var retry = 3;
 
@@ -173,7 +179,13 @@ var INTERSANGO = module.exports = function ( key ) {
 													};
 
 							var params = {
-								url         : '/APIv1/' + curr[i] + '/GetOrders',
+								url         : '/api/authenticated/v0.1/listOrders.php',
+								data        : {
+												"account_id" : acc.id,
+												"filters" : {
+													"states" : ["open","queued"]
+												}
+								},
 								error       : error_handler,
 								callback    : function( data ){
 									try {
@@ -188,9 +200,14 @@ var INTERSANGO = module.exports = function ( key ) {
 										return;
 									}
 
-									update_orders( curr[i], json.orders );
+									if ( json.length == 0 ){
+										console.log("No open orders at Intersango for " + acc.symbol );
+										return;
+									}
 
-									console.log("Got open orders at TradeHill for " + curr[i] );
+									update_orders( acc.symbol, json );
+
+									console.log("Got open orders at Intersango for " + acc.symbol );
 
 									if ( ++inserted == curr.length ){
 										if ( callback ){
@@ -200,10 +217,10 @@ var INTERSANGO = module.exports = function ( key ) {
 								}
 							};
 
-						    console.log("Getting open orders at TradeHill for " + curr[i] );
+						    console.log("Getting open orders at Intersango for " + acc.symbol );
 
 				            fetch(params);
-					 })(i);
+					 })(curr[i]);
 					}
 				},
 				getBalance : function ( error, callback ) {
