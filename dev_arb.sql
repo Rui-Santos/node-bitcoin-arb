@@ -3,7 +3,7 @@
 -- http://www.phpmyadmin.net
 --
 -- Host: 10.6.10.156
--- Generation Time: Dec 20, 2011 at 05:17 PM
+-- Generation Time: Dec 20, 2011 at 05:36 PM
 -- Server version: 5.1.49
 -- PHP Version: 5.3.3-7+squeeze3
 
@@ -81,16 +81,20 @@ CREATE TABLE IF NOT EXISTS `Exchanges` (
 
 CREATE TABLE IF NOT EXISTS `Orders` (
   `Id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `Arbitrages_Id` int(10) unsigned NOT NULL,
   `Exchanges_Id` tinyint(3) unsigned NOT NULL,
   `Currencies_Id` tinyint(3) unsigned NOT NULL,
   `OID` varchar(100) NOT NULL,
-  `Status` tinyint(4) NOT NULL,
+  `Status` enum('queued','opened','cancelled','filled','partial') NOT NULL,
   `BuySell` enum('buy','sell') NOT NULL,
   `Dt` datetime NOT NULL,
   `Amount` decimal(16,8) unsigned NOT NULL,
   `Price` decimal(11,5) unsigned NOT NULL,
+  `Partial_Amount` decimal(16,8) unsigned NOT NULL,
+  `Partial_Price` decimal(11,5) unsigned NOT NULL,
   PRIMARY KEY (`Id`),
-  UNIQUE KEY `Exchanges_Id` (`Exchanges_Id`,`OID`)
+  UNIQUE KEY `Exchanges_Id` (`Exchanges_Id`,`OID`),
+  KEY `Arbitrages_Id` (`Arbitrages_Id`)
 ) ENGINE=MyISAM  DEFAULT CHARSET=utf8;
 
 -- --------------------------------------------------------
