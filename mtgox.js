@@ -44,6 +44,16 @@ var MTGOX = module.exports = function ( key, secret ) {
 
 			var buysell = order.type == 1 ? 'sell' : 'buy';
 
+			var status = '';
+
+			if ( order.real_status == 'pending' ){
+				status = 'queued';
+			}else if( order.real_status == 'open' ){
+				status = 'opened';
+			}else{
+				status = 'filled';
+			}
+
 			orders_sql = "INSERT DELAYED INTO " +
 					"Orders( Exchanges_Id, Currencies_Id, OID, Status, BuySell, Dt, Amount, Price ) " +
 					"SELECT 1, Id, ? , ? , ? , FROM_UNIXTIME(?), ?, ? " +
@@ -51,14 +61,15 @@ var MTGOX = module.exports = function ( key, secret ) {
 					"ON DUPLICATE KEY UPDATE " +
 					"   Status = VALUES(Status)";
 
-			db.query( orders_sql, [ order.oid, order.status, buysell, order.date, order.amount, order.price, order.currency] );
+			db.query( orders_sql, [ order.oid, status, buysell, order.date, order.amount, order.price, order.currency] );
 
 			order_ids.push(order.oid);
 		});
 
 		var not_in_delete_oids = order_ids.join("','");
 
-		db.query("DELETE FROM Orders WHERE OID NOT IN ('" + not_in_delete_oids + "') AND Exchanges_Id = 1", callback);
+		db.query("UPDATE Orders SET Status = 'filled' WHERE Status IN ('opened','queued') AND `OID` NOT IN ('"
+					+ not_in_delete_oids + "') AND Exchanges_Id = 1", callback);
 	}
 
 	var fetch = function( params ){
@@ -347,6 +358,8 @@ var MTGOX = module.exports = function ( key, secret ) {
 								error_handler( err );
 								return;
 							}
+
+							console.log(json);
 
 							if ( json.error ){
 								error_handler( new Error( json.error ) );
