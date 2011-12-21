@@ -292,7 +292,7 @@ var MTGOX = module.exports = function ( key, secret ) {
 									       "UPDATE Rates SET Bid = ?, Ask = ?, Dt = NOW() " +
 									       "WHERE Exchanges_Id = 1 AND Currencies_Id IN " +
 									           "(SELECT Id FROM Currencies WHERE Symbol = '" + curr[i] + "')",
-									       [ json.return.buy.value, json.return.sell.value]
+									       [ json["return"].buy.value, json["return"].sell.value]
 									);
 
 									if ( ++inserted == curr.length ){
