@@ -48,20 +48,16 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 					"ON DUPLICATE KEY UPDATE " +
 					"   Status = VALUES(Status)";
 
-			db.query( orders_sql, [ order.oid, order.status, buysell, order.date, order.amount, order.price, symbol] );
+			db.query( orders_sql, [ order.oid, 'opened', buysell, order.date, order.amount, order.price, symbol] );
 
 			order_ids.push(order.oid);
-
-			if ( callback ){
-				return callback();
-			}
 		});
 
 		var not_in_delete_oids = order_ids.join("','");
 
-		db.query("DELETE FROM Orders WHERE OID NOT IN ('" + not_in_delete_oids +
+		db.query("UPDATE Orders SET Status = 'filled' WHERE Status IN ('opened','queued') AND `OID` NOT IN ('" + not_in_delete_oids +
 				"') AND Exchanges_Id = 2 AND Currencies_Id = ( SELECT Id FROM Currencies WHERE Symbol = '"
-				+ symbol + "' ) ");
+				+ symbol + "' ) ", callback );
 	}
 
 	var fetch = function( params ){
@@ -173,6 +169,8 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 										error_handler( err );
 										return;
 									}
+
+									console.log(json);
 
 									if ( json.error ){
 										error_handler( new Error( json.error ) );
@@ -475,13 +473,11 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 						}
 					}
 
-					if ( !input_params.currency ){
-						input_params.currency = 'USD';
-					}
-
 					var self = this;
 
 					var retry = 3;
+
+					var params = {};
 
 					var error_handler = function(err){
 
@@ -497,32 +493,52 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 												fetch(params);
 											};
 
-					var params = {
-						url         : '/APIv1/' + input_params.currency + '/CancelOrder',
-						data        : {
-										oid       : input_params.oid
-									},
-						error       : error_handler,
-						callback    : function( data ){
-							try {
-							   var json = JSON.parse(data);
-							} catch ( err ) {
-								error_handler( err );
-								return;
+					db.query("SELECT Symbol FROM Currencies WHERE Id = (" +
+							"SELECT Currencies_Id FROM Orders WHERE OID = ? AND Exchanges_Id = 2)",
+							[input_params.oid],
+							function( err, results, fields ){
+
+								var symbol = results[0].Symbol;
+
+								params = {
+									url         : '/APIv1/' + symbol + '/CancelOrder',
+									data        : {
+													oid       : input_params.oid
+												},
+									error       : error_handler,
+									callback    : function( data ){
+										try {
+										   var json = JSON.parse(data);
+										} catch ( err ) {
+											error_handler( err );
+											return;
+										}
+
+										if ( json.error && json.error.substr(0,20) != "No such market order" ){
+											error_handler( new Error( json.error ) );
+											return;
+										}else if( json.error && json.error.substr(0,20) == "No such market order" ){
+											db.query(
+													"UPDATE Orders SET Status = 'cancelled' WHERE OID = ? AND Exchanges_Id = 2",
+													[input_params.oid],
+													console.log("Order " + input_params.oid + " at TradeHill did not exist in open orders")
+											);
+
+											return;
+										}
+
+										db.query(
+												"UPDATE Orders SET Status = 'cancelled' WHERE OID = ? AND Exchanges_Id = 2",
+												[input_params.oid], update_orders.call(self, symbol, json.orders, input_params.callback)
+										);
+
+										console.log("Cancelled order  " + input_params.oid + " at TradeHill");
+									}
+								};
+
+								fetch(params);
 							}
-
-							if ( json.error ){
-								error_handler( new Error( json.error ) );
-								return;
-							}
-
-							update_orders( input_params.currency, json.orders, input_params.callback );
-
-							console.log("Cancelled order  " + input_params.oid + " at TradeHill");
-						}
-					};
-
-					fetch(params);
+					);
 				}
 	}
 };
