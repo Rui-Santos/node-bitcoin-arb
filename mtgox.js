@@ -359,8 +359,6 @@ var MTGOX = module.exports = function ( key, secret ) {
 								return;
 							}
 
-							console.log(json);
-
 							if ( json.error ){
 								error_handler( new Error( json.error ) );
 								return;
@@ -427,8 +425,6 @@ var MTGOX = module.exports = function ( key, secret ) {
 								error_handler( err );
 								return;
 							}
-
-							console.log(json);
 
 							if ( json.error ){
 								error_handler( new Error( json.error ) );
