@@ -494,10 +494,10 @@ var MTGOX = module.exports = function ( key, secret ) {
 								return;
 							}
 
-							setBalance('USD', json.usds );
-							setBalance('BTC', json.btcs );
-
-							update_orders( json.orders, input_params.callback );
+							db.query(
+									"UPDATE Orders SET Status = 'cancelled' WHERE OID = ? AND Exchanges_Id = 1",
+									[input_params.oid], update_orders.call(self, json.orders, input_params.callback)
+							);
 						}
 					};
 
