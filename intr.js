@@ -586,7 +586,7 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
 												input_params.callback
 										);
 
-										console.log("Cancelled order  " + input_params.oid + " at TradeHill");
+										console.log("Cancelled order  " + input_params.oid + " at Intersango");
 									}
 								};
 
