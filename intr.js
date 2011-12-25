@@ -44,7 +44,7 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
         );
     };
 
-	var update_orders = function( symbol, orders, callback ){
+	var update_orders = function( symbol, orders ){
 
 		var order_ids = [];
 
@@ -57,26 +57,23 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
 			var buysell = order.selling == true ? 'sell' : 'buy';
 
 			orders_sql = "INSERT DELAYED INTO " +
-					"Orders( Exchanges_Id, Currencies_Id, OID, Status, BuySell, Dt, Amount, Price ) " +
-					"SELECT 4, Id, ? , ? , ? , ?, ?, ? " +
+					"Orders( Exchanges_Id, Currencies_Id, OID, Status, BuySell, Dt, Amount, Price, Partial_Amount ) " +
+					"SELECT 4, Id, ? , ? , ? , ?, ?, ?, ? " +
 					"FROM Currencies WHERE Symbol = ? " +
 					"ON DUPLICATE KEY UPDATE " +
-					" Status = VALUES(Status)";
+					" Status = VALUES(Status), Partial_Amount = VALUES( Partial_Amount )";
 
-			db.query( orders_sql, [ order.id, 1, buysell, order.placed.substr(0, 19), order.quantity, order.rate, symbol] );
+			db.query( orders_sql, [ order.id, 1, buysell, order.placed.substr(0, 19),
+									order.quantity, order.rate, order.base_amount_traded, symbol ] );
 
 			order_ids.push(order.id);
-
-			if ( callback ){
-				return callback();
-			}
 		});
 
 		var not_in_delete_oids = order_ids.join("','");
 
-		db.query("DELETE FROM Orders WHERE OID NOT IN ('" + not_in_delete_oids +
-				"') AND Exchanges_Id = 4 AND Currencies_Id = ( SELECT Id FROM Currencies WHERE Symbol = '"
-				+ symbol + "' ) ");
+		db.query("UPDATE Orders SET Status = 'filled' WHERE Status IN ('opened','queued') " +
+				" AND `OID` NOT IN ('" + not_in_delete_oids +"') AND Exchanges_Id = 4 AND " +
+				" Currencies_Id = ( SELECT Id FROM Currencies WHERE Symbol = '" + symbol + "' ) ");
 	}
 
 	var fetch = function( params ){
@@ -145,6 +142,19 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
 
 		this[symbol] = val;
 		db.query("UPDATE Exchanges SET `" + symbol + "` = " + val + ", Dt = NOW() WHERE Id = 4");
+	}
+
+	var getAccId = function(symbol){
+
+		var acc_id = '';
+
+		accounts.forEach(function(acc){
+			if ( acc.symbol == symbol ){
+				acc_id = acc.id;
+			}
+		});
+
+		return acc_id;
 	}
 
 	return {
@@ -327,7 +337,7 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
 				},
 				buy : function ( input_params ) {
 
-					console.log("Buying " + input_params.amount + " at TradeHill");
+					console.log("Buying " + input_params.amount + " at Intersango");
 
 					if ( input_params.amount <= 0 ){
 
@@ -373,7 +383,9 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
 										quantity            : input_params.amount,
 										rate                : input_params.price,
 										selling             : false,
-										base_account_id     : 0
+										base_account_id     : 932919096247,
+										quote_account_id    : getAccId( input_params.currency ),
+										type                : "gtc"
 									},
 						error       : error_handler,
 						callback    : function( data ){
@@ -384,14 +396,30 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
 								return;
 							}
 
-							if ( json.error ){
+							if ( json.error && json.error.substr(0,28) != "You do not have enough funds" ){
 								error_handler( new Error( json.error ) );
 								return;
+							}else if( json.error && json.error.substr(0,28) == "You do not have enough funds" ){
+								console.log("Not enough funds to buy " + input_params.amount + " at Intersango");
+								if ( input_params.error ){
+									return input_params.error();
+								}else{
+									return false;
+								}
 							}
 
-							update_orders( input_params.currency, json.orders, input_params.callback );
+							order_sql = "INSERT DELAYED INTO " +
+									"Orders( Exchanges_Id, Currencies_Id, OID, Status, BuySell, Dt, Amount, Price ) " +
+									"SELECT 4, Id, ? , ? , ? , NOW(), ?, ? " +
+									"FROM Currencies WHERE Symbol = ?";
 
-							console.log("Bought " + input_params.amount + " at TradeHill");
+							db.query(
+										order_sql,
+										[ json.order_id, "queued", "buy", input_params.amount, input_params.price, input_params.currency],
+										input_params.callback
+							);
+
+							console.log("Bought " + input_params.amount + " at Intersango");
 						}
 					};
 
@@ -399,7 +427,7 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
 				},
 				sell : function ( input_params ) {
 
-						console.log("Selling " + input_params.amount + " at TradeHill");
+						console.log("Selling " + input_params.amount + " at Intersango");
 
 						if ( input_params.amount <= 0 ){
 
@@ -418,7 +446,7 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
 						}
 
 						if ( !input_params.price ){
-							input_params.price = 0.00001;
+							input_params.price = 9999999999;
 						}
 
 						var self = this;
@@ -440,10 +468,14 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
 												};
 
 						var params = {
-							url         : '/APIv1/' + input_params.currency + '/SellBTC',
+							url         : '/api/authenticated/v0.1/placeLimitOrder.php',
 							data        : {
-											amount      : input_params.amount,
-											price       : input_params.price
+											quantity            : input_params.amount,
+											rate                : input_params.price,
+											selling             : true,
+											base_account_id     : 932919096247,
+											quote_account_id    : getAccId( input_params.currency ),
+											type                : "gtc"
 										},
 							error       : error_handler,
 							callback    : function( data ){
@@ -454,14 +486,31 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
 									return;
 								}
 
-								if ( json.error ){
+								if ( json.error && json.error.substr(0,28) != "You do not have enough funds" ){
 									error_handler( new Error( json.error ) );
 									return;
+								}else if( json.error && json.error.substr(0,28) == "You do not have enough funds" ){
+									console.log("Not enough funds to sell " + input_params.amount + " at Intersango");
+									if ( input_params.error ){
+										return input_params.error();
+									}else{
+										return false;
+									}
 								}
 
-								update_orders( input_params.currency, json.orders, input_params.callback );
+								order_sql = "INSERT DELAYED INTO " +
+										"Orders( Exchanges_Id, Currencies_Id, OID, Status, BuySell, Dt, Amount, Price ) " +
+										"SELECT 4, Id, ? , ? , ? , NOW(), ?, ? " +
+										"FROM Currencies WHERE Symbol = ? ";
 
-								console.log("Sold " + input_params.amount + " at TradeHill");
+
+								db.query(
+											order_sql,
+											[ json.order_id, "queued", "sell", input_params.amount, input_params.price, input_params.currency],
+											input_params.callback
+								);
+
+								console.log("Sold " + input_params.amount + " at Intersango");
 							}
 						};
 
@@ -481,13 +530,11 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
 						}
 					}
 
-					if ( !input_params.currency ){
-						input_params.currency = 'USD';
-					}
-
 					var self = this;
 
 					var retry = 3;
+
+					var params = {};
 
 					var error_handler = function(err){
 
@@ -503,32 +550,49 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
 												fetch(params);
 											};
 
-					var params = {
-						url         : '/APIv1/' + input_params.currency + '/CancelOrder',
-						data        : {
-										oid       : input_params.oid
-									},
-						error       : error_handler,
-						callback    : function( data ){
-							try {
-							   var json = JSON.parse(data);
-							} catch ( err ) {
-								error_handler( err );
-								return;
+					db.query("SELECT Symbol FROM Currencies WHERE Id = (" +
+							"SELECT Currencies_Id FROM Orders WHERE OID = ? AND Exchanges_Id = 4)",
+							[input_params.oid],
+							function( err, results, fields ){
+
+								if ( results.length == 0 ){
+									throw new Error( "No such order exists" );
+									return;
+								}
+
+								params = {
+									url         : '/api/authenticated/v0.1/requestCancelOrder.php',
+									data        : {
+													account_id  : getAccId( results[0].Symbol ),
+													order_id    : input_params.oid
+												},
+									error       : error_handler,
+									callback    : function( data ){
+										try {
+										   var json = JSON.parse(data);
+										} catch ( err ) {
+											error_handler( err );
+											return;
+										}
+
+										if ( json.result != "success" ){
+											error_handler( new Error( json.error ) );
+											return;
+										}
+
+										db.query(
+												"UPDATE Orders SET Status = 'cancelled' WHERE OID = ? AND Exchanges_Id = 4",
+												[input_params.oid],
+												input_params.callback
+										);
+
+										console.log("Cancelled order  " + input_params.oid + " at TradeHill");
+									}
+								};
+
+								fetch(params);
 							}
-
-							if ( json.error ){
-								error_handler( new Error( json.error ) );
-								return;
-							}
-
-							update_orders( input_params.currency, json.orders, input_params.callback );
-
-							console.log("Cancelled order  " + input_params.oid + " at TradeHill");
-						}
-					};
-
-					fetch(params);
+					);
 				}
 	}
 };
