@@ -134,6 +134,9 @@ var TRADEHILL = module.exports = function ( key, secret ) {
 				USD : -1,
 				BTC : -1,
                 EUR : -1,
+				getTitle : function(){
+					return "TradeHill";
+				},
 				getOrders : function ( error, callback ) {
 
 					var curr = ['USD','EUR'];

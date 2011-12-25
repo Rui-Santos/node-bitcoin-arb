@@ -163,6 +163,9 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
                 "GBP": -1,
                 "PLN": -1,
                 "EUR": -1,
+				getTitle : function(){
+					return "INTERSANGO";
+				},
 				getOrders : function ( error, callback ) {
 
 					var curr = getAccounts();

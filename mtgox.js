@@ -145,6 +145,9 @@ var MTGOX = module.exports = function ( key, secret ) {
 				USD : -1,
 				BTC : -1,
                 EUR : -1,
+				getTitle : function(){
+					return "MTGOX";
+				},
 				getOrders : function ( error, callback ) {
 
 					console.log("Getting open orders at MtGOX");
