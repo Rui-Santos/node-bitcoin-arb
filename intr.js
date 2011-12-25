@@ -294,6 +294,7 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
 
                     var params = {
                         url         : '/api/ticker.php',
+                        method      : 'GET',
                         error       : error_handler,
                         callback    : function(data){
 
@@ -309,10 +310,10 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
                                 return;
                             }
 
-                            update_rates( "USD" , json['1'].buy, json['1'].sell );
+                            update_rates( "GBP" , json['1'].buy, json['1'].sell );
                             update_rates( "EUR" , json['2'].buy, json['2'].sell );
-
-                            // TODO - continue all currs
+                            update_rates( "USD" , json['3'].buy, json['3'].sell );
+                            update_rates( "PLN" , json['4'].buy, json['4'].sell );
 
                             console.log("Got rates at Intersango");
 
@@ -367,10 +368,12 @@ var INTERSANGO = module.exports = function ( key, accounts ) {
 											};
 
 					var params = {
-						url         : '/APIv1/' + input_params.currency + '/BuyBTC',
+						url         : '/api/authenticated/v0.1/placeLimitOrder.php',
 						data        : {
-										amount      : input_params.amount,
-										price       : input_params.price
+										quantity            : input_params.amount,
+										rate                : input_params.price,
+										selling             : false,
+										base_account_id     : 0
 									},
 						error       : error_handler,
 						callback    : function( data ){
